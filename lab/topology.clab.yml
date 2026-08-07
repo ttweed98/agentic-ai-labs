@@ -1,0 +1,63 @@
+---
+name: ai-network
+
+mgmt:
+  network: "mgmt_ai_net"
+  ipv4-subnet: 172.20.20.0/24
+
+topology:
+  kinds:
+    arista_ceos:
+      image: ceos:4.34.0F
+      env:
+        CLAB_MGMT_VRF: MGMT 
+    linux:
+      image: alpine:latest
+  
+  nodes:
+    spine1:
+      kind: arista_ceos
+      mgmt-ipv4: 172.20.20.11
+      startup-config: configs/spine1.cfg
+    
+    spine2:
+      kind: arista_ceos
+      mgmt-ipv4: 172.20.20.12
+      startup-config: configs/spine2.cfg
+    
+    leaf1:
+      kind: arista_ceos
+      mgmt-ipv4: 172.20.20.13
+      startup-config: configs/leaf1.cfg
+    
+    leaf2:
+      kind: arista_ceos
+      mgmt-ipv4: 172.20.20.14
+      startup-config: configs/leaf2.cfg
+
+    host1:
+      kind: linux
+      mgmt-ipv4: 172.20.20.15
+      exec:
+        - ip addr add 10.100.1.2/24 dev eth1 
+        - ip route add default via 10.100.1.1
+      
+    
+    host2:
+      kind: linux
+      mgmt-ipv4: 172.20.20.16
+      exec:
+        - ip addr add 10.200.1.2/24 dev eth1 
+        - ip route add default via 10.200.2.1
+  
+  links:
+    - endpoints: ["spine1:eth1", "leaf1:eth1"]
+      ipv4: ["10.1.1.1/31", "10.1.1.0/31"]
+    - endpoints: ["spine1:eth2", "leaf2:eth1"]
+      ipv4: ["10.2.1.1/31", "10.2.1.0/31"]
+    - endpoints: ["spine2:eth1", "leaf1:eth2"]
+      ipv4: ["10.1.2.1/31", "10.1.2.0/31"]
+    - endpoints: ["spine2:eth2", "leaf2:eth2"]
+      ipv4: ["10.2.2.1/31", "10.2.2.0/31"]
+    - endpoints: ["leaf1:eth3", "host1:eth1"]
+    - endpoints: ["leaf2:eth3", "host2:eth1"]

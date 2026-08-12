@@ -7,6 +7,22 @@ from agent_nettools.eapi import EapiError, run_commands
 from agent_nettools.inventory import is_approved, load_approved_devices
 from agent_nettools.topology import resolve_address
 
+from typing import TypedDict
+
+
+class DeviceStatus(TypedDict):
+    hostname: str
+    manufacturer: str
+    model: str
+    serial_number: str
+    system_mac_address: str
+    software_version: str
+    uptime_seconds: float
+
+
+class DeviceList(TypedDict):
+    devices: list[str]
+
 COMMANDS = ["show hostname", "show version"]
 
 VERSION_FIELDS = {
@@ -45,7 +61,7 @@ def _identity_from(version_result: dict) -> dict:
     return identity
 
 
-def get_device_status(device: str, caller: str = "cli") -> dict:
+def get_device_status(device: str, caller: str = "cli") -> DeviceStatus:
     """Return the identity of the requested device as the device itself reports it."""
     started = time.monotonic()
 
@@ -108,7 +124,7 @@ def get_device_status(device: str, caller: str = "cli") -> dict:
     finally:
         record["duration_ms"] = round((time.monotonic() - started) * 1000, 1)
         write_record(record)
-def list_devices(caller: str = "cli") -> dict:
+def list_devices(caller: str = "cli") -> DeviceList:
     """Return the names of the devices this toolset is permitted to reach."""
     started = time.monotonic()
 

@@ -1,0 +1,6 @@
+---
+devices:
+  - spine1
+  - spine2
+  - leaf1
+  - leaf2

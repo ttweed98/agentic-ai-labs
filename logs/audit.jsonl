@@ -1,4 +1,0 @@
-{"outcome": "successful", "timestamp": "2026-08-12T15:06:10+00:00", "tool": "test"}
-{"outcome": "successful", "timestamp": "2026-08-12T15:06:39+00:00", "tool": "test"}
-{"approved": true, "blocked_reason": null, "caller": "cli", "command_sent": ["show hostname", "show version"], "detail": null, "duration_ms": 62.5, "outcome": "successful", "requested_device": "leaf1", "target_address": "172.20.20.13", "timestamp": "2026-08-12T15:10:27+00:00", "tool": "get_device_status"}
-{"approved": false, "blocked_reason": "not_approved", "caller": "cli", "command_sent": null, "detail": "leaf9 is not in the approved device list", "duration_ms": 0.4, "outcome": "refused", "requested_device": "leaf9", "target_address": null, "timestamp": "2026-08-12T15:10:27+00:00", "tool": "get_device_status"}

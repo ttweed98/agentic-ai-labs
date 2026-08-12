@@ -3,3 +3,6 @@ clab-*
 *.log
 .env
 .venv/
+logs/
+__pycache__/
+*.pyc

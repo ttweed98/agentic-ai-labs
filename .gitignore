@@ -2,3 +2,4 @@ clab-*
 .*.clab.yml.bak
 *.log
 .env
+.venv/

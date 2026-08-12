@@ -6,7 +6,7 @@ import pytest
 
 from agent_nettools.inventory import is_approved, load_approved_devices
 from agent_nettools.topology import resolve_address
-from agent_nettools.tools import ToolError, get_device_status
+from agent_nettools.tools import ToolError, get_device_status, list_devices
 
 
 def test_approved_list_loads_as_a_list_of_names():
@@ -58,3 +58,13 @@ def test_the_password_never_reaches_the_audit_record(monkeypatch):
         get_device_status("leaf9")
 
     assert "planted-secret-value" not in json.dumps(captured[0])
+
+def test_list_devices_returns_the_approved_names(monkeypatch):
+    captured = []
+    monkeypatch.setattr("agent_nettools.tools.write_record", captured.append)
+
+    result = list_devices()
+
+    assert result["devices"] == load_approved_devices()
+    assert captured[0]["outcome"] == "successful"
+    assert captured[0]["device_count"] == len(result["devices"])

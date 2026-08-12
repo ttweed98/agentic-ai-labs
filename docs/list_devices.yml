@@ -1,0 +1,22 @@
+---
+list_devices:
+  owner: "Network Automation Team"
+  purpose: "Return the names of the devices this toolset is permitted to reach"
+  arguments: {}
+  returns:
+    devices:
+      type: list of string
+      source: "inventory/approved_devices.yml → devices"
+      example: ["spine1", "spine2", "leaf1", "leaf2"]
+  blocked_when:
+    - "list_unreadable — inventory/approved_devices.yml is missing or cannot be read"
+    - "list_malformed — the file does not contain a list of device names under 'devices'"
+  logs:
+    timestamp:      "UTC ISO-8601, when the call started"
+    tool:           "list_devices"
+    caller:         "what invoked it - agent session ID, 'cli', or job name"
+    outcome:        "successful | refused | error"
+    blocked_reason: "the token of the blocked_when case that fired; null on success"
+    detail:         "the observation, not the conclusion"
+    device_count:   "how many names were returned"
+    duration_ms:    "elapsed time of the call"

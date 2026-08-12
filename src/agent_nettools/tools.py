@@ -4,10 +4,19 @@ import time
 
 from agent_nettools.audit import utc_now, write_record
 from agent_nettools.eapi import EapiError, run_commands
-from agent_nettools.inventory import is_approved
+from agent_nettools.inventory import is_approved, load_approved_devices
 from agent_nettools.topology import resolve_address
 
 COMMANDS = ["show hostname", "show version"]
+
+VERSION_FIELDS = {
+    "manufacturer": "mfgName",
+    "model": "modelName",
+    "serial_number": "serialNumber",
+    "system_mac_address": "systemMacAddress",
+    "software_version": "version",
+    "uptime_seconds": "uptime",
+}
 
 
 class ToolError(Exception):
@@ -17,6 +26,23 @@ class ToolError(Exception):
         self.reason = reason
         self.detail = detail
         super().__init__(f"{reason}: {detail}")
+
+
+def _identity_from(version_result: dict) -> dict:
+    """Map the device's fields to the contract's fields. Raise if any are absent."""
+    identity = {}
+    missing = []
+
+    for contract_field, device_field in VERSION_FIELDS.items():
+        if device_field not in version_result:
+            missing.append(device_field)
+        else:
+            identity[contract_field] = version_result[device_field]
+
+    if missing:
+        raise ToolError("incomplete_result", f"show version omitted: {', '.join(missing)}")
+
+    return identity
 
 
 def get_device_status(device: str, caller: str = "cli") -> dict:
@@ -63,17 +89,52 @@ def get_device_status(device: str, caller: str = "cli") -> dict:
         if reported != device:
             raise ToolError("hostname_mismatch", f"requested {device}, device reported {reported!r}")
 
+        identity = _identity_from(version_result)
+        identity["hostname"] = reported
+
         record["outcome"] = "successful"
 
-        return {
-            "hostname": reported,
-            "manufacturer": version_result.get("mfgName"),
-            "model": version_result.get("modelName"),
-            "serial_number": version_result.get("serialNumber"),
-            "system_mac_address": version_result.get("systemMacAddress"),
-            "software_version": version_result.get("version"),
-            "uptime_seconds": version_result.get("uptime"),
-        }
+        return identity
+
+    except ToolError as exc:
+        record["outcome"] = "refused"
+        record["blocked_reason"] = exc.reason
+        record["detail"] = exc.detail
+        raise
+    except Exception as exc:
+        record["outcome"] = "error"
+        record["detail"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        record["duration_ms"] = round((time.monotonic() - started) * 1000, 1)
+        write_record(record)
+def list_devices(caller: str = "cli") -> dict:
+    """Return the names of the devices this toolset is permitted to reach."""
+    started = time.monotonic()
+
+    record = {
+        "timestamp": utc_now(),
+        "tool": "list_devices",
+        "caller": caller,
+        "outcome": None,
+        "blocked_reason": None,
+        "detail": None,
+        "device_count": None,
+        "duration_ms": None,
+    }
+
+    try:
+        try:
+            devices = load_approved_devices()
+        except FileNotFoundError as exc:
+            raise ToolError("list_unreadable", str(exc)) from exc
+        except ValueError as exc:
+            raise ToolError("list_malformed", str(exc)) from exc
+
+        record["outcome"] = "successful"
+        record["device_count"] = len(devices)
+
+        return {"devices": devices}
 
     except ToolError as exc:
         record["outcome"] = "refused"

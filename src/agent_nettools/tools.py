@@ -1,6 +1,7 @@
 """Read-only network tools. Contracts: docs/*.yml"""
 
 import time
+from contextlib import contextmanager
 from typing_extensions import TypedDict
 
 from agent_nettools.audit import utc_now, write_record
@@ -59,6 +60,72 @@ class ToolError(Exception):
         super().__init__(f"{reason}: {detail}")
 
 
+@contextmanager
+def audited(tool: str, caller: str, **initial):
+    """Write one audit record for this call, whatever happens inside the block."""
+    started = time.monotonic()
+
+    record = {
+        "timestamp": utc_now(),
+        "tool": tool,
+        "caller": caller,
+        "outcome": None,
+        "blocked_reason": None,
+        "detail": None,
+        "duration_ms": None,
+        **initial,
+    }
+
+    try:
+        yield record
+        record["outcome"] = "successful"
+    except ToolError as exc:
+        record["outcome"] = "refused"
+        record["blocked_reason"] = exc.reason
+        record["detail"] = exc.detail
+        raise
+    except Exception as exc:
+        record["outcome"] = "error"
+        record["detail"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        record["duration_ms"] = round((time.monotonic() - started) * 1000, 1)
+        write_record(record)
+
+
+def _connect(device: str, record: dict, commands: list[str]) -> list[dict]:
+    """Gate, resolve, connect. Raise ToolError on any refusal."""
+    if not is_approved(device):
+        raise ToolError("not_approved", f"{device} is not in the approved device list")
+
+    record["approved"] = True
+
+    try:
+        address = resolve_address(device)
+    except LookupError as exc:
+        raise ToolError("not_in_topology", str(exc)) from exc
+    except ValueError as exc:
+        raise ToolError("wrong_kind", str(exc)) from exc
+
+    record["target_address"] = address
+    record["command_sent"] = commands
+
+    try:
+        return run_commands(address, commands)
+    except EapiError as exc:
+        raise ToolError(exc.reason, exc.detail) from exc
+
+
+def _verify_hostname(requested: str, hostname_result: dict) -> str:
+    """Confirm we reached the device we asked for."""
+    reported = hostname_result.get("hostname")
+
+    if reported != requested:
+        raise ToolError("hostname_mismatch", f"requested {requested}, device reported {reported!r}")
+
+    return reported
+
+
 def _identity_from(version_result: dict) -> dict:
     """Map the device's fields to the contract's fields. Raise if any are absent."""
     identity = {}
@@ -113,85 +180,25 @@ def _interfaces_from(brief_result: dict) -> list[InterfaceRecord]:
 
 def get_device_status(device: str, caller: str = "cli") -> DeviceStatus:
     """Return the identity of the requested device as the device itself reports it."""
-    started = time.monotonic()
-
-    record = {
-        "timestamp": utc_now(),
-        "tool": "get_device_status",
-        "caller": caller,
-        "requested_device": device,
-        "approved": False,
-        "target_address": None,
-        "command_sent": None,
-        "outcome": None,
-        "blocked_reason": None,
-        "detail": None,
-        "duration_ms": None,
-    }
-
-    try:
-        if not is_approved(device):
-            raise ToolError("not_approved", f"{device} is not in the approved device list")
-
-        record["approved"] = True
-
-        try:
-            address = resolve_address(device)
-        except LookupError as exc:
-            raise ToolError("not_in_topology", str(exc)) from exc
-        except ValueError as exc:
-            raise ToolError("wrong_kind", str(exc)) from exc
-
-        record["target_address"] = address
-        record["command_sent"] = COMMANDS
-
-        try:
-            hostname_result, version_result = run_commands(address, COMMANDS)
-        except EapiError as exc:
-            raise ToolError(exc.reason, exc.detail) from exc
-
-        reported = hostname_result.get("hostname")
-
-        if reported != device:
-            raise ToolError("hostname_mismatch", f"requested {device}, device reported {reported!r}")
+    with audited(
+        "get_device_status",
+        caller,
+        requested_device=device,
+        approved=False,
+        target_address=None,
+        command_sent=None,
+    ) as record:
+        hostname_result, version_result = _connect(device, record, COMMANDS)
 
         identity = _identity_from(version_result)
-        identity["hostname"] = reported
-
-        record["outcome"] = "successful"
+        identity["hostname"] = _verify_hostname(device, hostname_result)
 
         return identity
-
-    except ToolError as exc:
-        record["outcome"] = "refused"
-        record["blocked_reason"] = exc.reason
-        record["detail"] = exc.detail
-        raise
-    except Exception as exc:
-        record["outcome"] = "error"
-        record["detail"] = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
-        record["duration_ms"] = round((time.monotonic() - started) * 1000, 1)
-        write_record(record)
 
 
 def list_devices(caller: str = "cli") -> DeviceList:
     """Return the names of the devices this toolset is permitted to reach."""
-    started = time.monotonic()
-
-    record = {
-        "timestamp": utc_now(),
-        "tool": "list_devices",
-        "caller": caller,
-        "outcome": None,
-        "blocked_reason": None,
-        "detail": None,
-        "device_count": None,
-        "duration_ms": None,
-    }
-
-    try:
+    with audited("list_devices", caller, device_count=None) as record:
         try:
             devices = load_approved_devices()
         except FileNotFoundError as exc:
@@ -199,86 +206,27 @@ def list_devices(caller: str = "cli") -> DeviceList:
         except ValueError as exc:
             raise ToolError("list_malformed", str(exc)) from exc
 
-        record["outcome"] = "successful"
         record["device_count"] = len(devices)
 
         return {"devices": devices}
 
-    except ToolError as exc:
-        record["outcome"] = "refused"
-        record["blocked_reason"] = exc.reason
-        record["detail"] = exc.detail
-        raise
-    except Exception as exc:
-        record["outcome"] = "error"
-        record["detail"] = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
-        record["duration_ms"] = round((time.monotonic() - started) * 1000, 1)
-        write_record(record)
-
 
 def check_interfaces(device: str, caller: str = "cli") -> InterfaceList:
     """Return the operational state of each fabric interface on the requested device."""
-    started = time.monotonic()
+    with audited(
+        "check_interfaces",
+        caller,
+        requested_device=device,
+        approved=False,
+        target_address=None,
+        command_sent=None,
+        interface_count=None,
+    ) as record:
+        brief_result, hostname_result = _connect(device, record, INTERFACE_COMMANDS)
 
-    record = {
-        "timestamp": utc_now(),
-        "tool": "check_interfaces",
-        "caller": caller,
-        "requested_device": device,
-        "approved": False,
-        "target_address": None,
-        "command_sent": None,
-        "outcome": None,
-        "blocked_reason": None,
-        "detail": None,
-        "interface_count": None,
-        "duration_ms": None,
-    }
-
-    try:
-        if not is_approved(device):
-            raise ToolError("not_approved", f"{device} is not in the approved device list")
-
-        record["approved"] = True
-
-        try:
-            address = resolve_address(device)
-        except LookupError as exc:
-            raise ToolError("not_in_topology", str(exc)) from exc
-        except ValueError as exc:
-            raise ToolError("wrong_kind", str(exc)) from exc
-
-        record["target_address"] = address
-        record["command_sent"] = INTERFACE_COMMANDS
-
-        try:
-            brief_result, hostname_result = run_commands(address, INTERFACE_COMMANDS)
-        except EapiError as exc:
-            raise ToolError(exc.reason, exc.detail) from exc
-
-        reported = hostname_result.get("hostname")
-
-        if reported != device:
-            raise ToolError("hostname_mismatch", f"requested {device}, device reported {reported!r}")
+        _verify_hostname(device, hostname_result)
 
         interfaces = _interfaces_from(brief_result)
-
-        record["outcome"] = "successful"
         record["interface_count"] = len(interfaces)
 
         return {"interfaces": interfaces}
-
-    except ToolError as exc:
-        record["outcome"] = "refused"
-        record["blocked_reason"] = exc.reason
-        record["detail"] = exc.detail
-        raise
-    except Exception as exc:
-        record["outcome"] = "error"
-        record["detail"] = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
-        record["duration_ms"] = round((time.monotonic() - started) * 1000, 1)
-        write_record(record)

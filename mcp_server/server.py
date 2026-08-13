@@ -2,7 +2,16 @@
 
 from mcp.server import MCPServer
 
-from agent_nettools.tools import DeviceList, DeviceStatus, InterfaceList, get_device_status, list_devices, check_interfaces
+from agent_nettools.tools import (
+    DeviceList,
+    DeviceStatus,
+    InterfaceList,
+    RouteList,
+    check_interfaces,
+    check_routes,
+    get_device_status,
+    list_devices,
+)
 
 mcp = MCPServer("AI Network Lab Tools")
 
@@ -18,10 +27,17 @@ def device_status(device: str) -> DeviceStatus:
     """Return the identity of one approved device as the device itself reports it."""
     return get_device_status(device, caller="mcp")
 
+
 @mcp.tool()
 def interfaces(device: str) -> InterfaceList:
     """Return the operational state of each fabric interface on one approved device."""
     return check_interfaces(device, caller="mcp")
+
+
+@mcp.tool()
+def routes(device: str) -> RouteList:
+    """Return the connected and BGP-learned routes on one approved device."""
+    return check_routes(device, caller="mcp")
 
 
 if __name__ == "__main__":

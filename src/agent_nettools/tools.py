@@ -35,7 +35,23 @@ class InterfaceList(TypedDict):
     interfaces: list[InterfaceRecord]
 
 
+class NextHop(TypedDict):
+    address: str
+    interface: str
+
+
+class RouteRecord(TypedDict):
+    prefix: str
+    route_type: str
+    next_hops: list[NextHop]
+
+
+class RouteList(TypedDict):
+    routes: list[RouteRecord]
+
+
 COMMANDS = ["show hostname", "show version"]
+ROUTE_COMMANDS = ["show ip route connected", "show ip route bgp", "show hostname"]
 
 VERSION_FIELDS = {
     "manufacturer": "mfgName",
@@ -178,6 +194,36 @@ def _interfaces_from(brief_result: dict) -> list[InterfaceRecord]:
     return records
 
 
+def _routes_from(*route_results: dict) -> list[RouteRecord]:
+    """Merge the device's route payloads into the contract's records."""
+    records: list[RouteRecord] = []
+
+    for result in route_results:
+        routes = result.get("vrfs", {}).get("default", {}).get("routes")
+
+        if not isinstance(routes, dict):
+            raise ToolError("incomplete_result", "no vrfs.default.routes mapping in route output")
+
+        for prefix, entry in routes.items():
+            vias = entry.get("vias")
+
+            if "routeType" not in entry or not isinstance(vias, list):
+                raise ToolError("incomplete_result", f"{prefix} omitted routeType or vias")
+
+            records.append({
+                "prefix": prefix,
+                "route_type": entry["routeType"],
+                "next_hops": [
+                    {"address": via.get("nexthopAddr", ""), "interface": via.get("interface", "")}
+                    for via in vias
+                ],
+            })
+
+    if not records:
+        raise ToolError("no_routes", "device returned no routes in VRF default")
+
+    return records
+
 def get_device_status(device: str, caller: str = "cli") -> DeviceStatus:
     """Return the identity of the requested device as the device itself reports it."""
     with audited(
@@ -230,3 +276,24 @@ def check_interfaces(device: str, caller: str = "cli") -> InterfaceList:
         record["interface_count"] = len(interfaces)
 
         return {"interfaces": interfaces}
+
+
+def check_routes(device: str, caller: str = "cli") -> RouteList:
+    """Return the connected and BGP-learned routes on the requested device."""
+    with audited(
+        "check_routes",
+        caller,
+        requested_device=device,
+        approved=False,
+        target_address=None,
+        command_sent=None,
+        route_count=None,
+    ) as record:
+        connected_result, bgp_result, hostname_result = _connect(device, record, ROUTE_COMMANDS)
+
+        _verify_hostname(device, hostname_result)
+
+        routes = _routes_from(connected_result, bgp_result)
+        record["route_count"] = len(routes)
+
+        return {"routes": routes}

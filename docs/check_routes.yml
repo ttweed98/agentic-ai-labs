@@ -1,0 +1,56 @@
+---
+check_routes:
+  owner: "Network Automation Team"
+  purpose: "Return the connected and BGP-learned routes on the requested device, as the device itself reports them"
+  arguments:
+    device:
+      type: string
+      required: true
+      validation: "must be present in inventory/approved_devices.yml"
+  returns:
+    routes:
+      type: "list of route records — VRF default only"
+      source: "show ip route connected | json and show ip route bgp | json → vrfs.default.routes"
+      record:
+        prefix:
+          type: string
+          source: "the key of each entry in vrfs.default.routes"
+          example: "10.200.2.0/24"
+        route_type:
+          type: string
+          source: "vrfs.default.routes.<prefix>.routeType"
+          example: "eBGP"
+        next_hops:
+          type: "list of {address, interface} — one entry per via"
+          source: "vrfs.default.routes.<prefix>.vias"
+          note: "address is an empty string for connected routes, where the device
+                 reports only an interface. A via with two entries means the prefix
+                 is reachable by two paths"
+          example: '[{"address": "10.1.1.1", "interface": "Ethernet1"},
+                     {"address": "10.1.2.1", "interface": "Ethernet2"}]'
+  blocked_when:
+    - "not_approved — device not present in inventory/approved_devices.yml"
+    - "not_in_topology — approved, but no entry in topology-data.json"
+    - "wrong_kind — approved name, but the node is not an arista_ceos device"
+    - "no_credentials — EOS_USERNAME or EOS_PASSWORD is not set"
+    - "no_response — no answer from the target address within the timeout"
+    - "connect_failed — could not establish a connection. Cause not determinable from the
+       client: refused, no route, or DNS failure"
+    - "auth_rejected — credentials refused by the device (HTTP 401)"
+    - "command_failed — the device returned an error for a command"
+    - "hostname_mismatch — the device reported a different hostname than the one requested"
+    - "incomplete_result — a route record omitted a field the contract promises"
+    - "no_routes — the device returned no routes at all in VRF default"
+  logs:
+    timestamp:        "UTC ISO-8601, when the call started"
+    tool:             "check_routes"
+    caller:           "what invoked it - agent session ID, 'cli', or job name"
+    requested_device: "device exactly as specified in the argument"
+    approved:         "true | false - did it pass inventory/approved_devices.yml"
+    target_address:   "address actually used"
+    command_sent:     "exact commands issued"
+    outcome:          "successful | refused | error"
+    blocked_reason:   "the token of the blocked_when case that fired; null on success"
+    detail:           "the observation, not the conclusion"
+    route_count:      "how many route records were returned"
+    duration_ms:      "elapsed time of the call"

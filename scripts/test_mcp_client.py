@@ -28,6 +28,10 @@ async def main() -> None:
         print(f"\n=== CALL: interfaces (device={device}) ===")
         result = await client.call_tool("interfaces", {"device": device})
         print(result.structured_content)
+        
+        print(f"\n=== CALL: routes (device={device}) ===")
+        result = await client.call_tool("routes", {"device": device})
+        print(result.structured_content)
 
 
 if __name__ == "__main__":

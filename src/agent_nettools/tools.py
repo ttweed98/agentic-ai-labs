@@ -50,6 +50,23 @@ class RouteList(TypedDict):
     routes: list[RouteRecord]
 
 
+class BgpPeer(TypedDict):
+    peer_address: str
+    remote_asn: str
+    peer_state: str
+    idle_reason: str
+    prefixes_received: int
+    prefixes_accepted: int
+    messages_received: int
+    messages_sent: int
+
+
+class BgpSummary(TypedDict):
+    local_asn: str
+    router_id: str
+    peers: list[BgpPeer]
+    
+    
 COMMANDS = ["show hostname", "show version"]
 ROUTE_COMMANDS = ["show ip route connected", "show ip route bgp", "show hostname"]
 
@@ -65,6 +82,17 @@ VERSION_FIELDS = {
 INTERFACE_COMMANDS = ["show ip interface brief", "show hostname"]
 
 EXCLUDED_INTERFACES = {"Management0"}
+
+BGP_COMMANDS = ["show ip bgp summary", "show hostname"]
+
+PEER_FIELDS = {
+    "remote_asn": "asn",
+    "peer_state": "peerState",
+    "prefixes_received": "prefixReceived",
+    "prefixes_accepted": "prefixAccepted",
+    "messages_received": "msgReceived",
+    "messages_sent": "msgSent",
+}
 
 
 class ToolError(Exception):
@@ -224,6 +252,41 @@ def _routes_from(*route_results: dict) -> list[RouteRecord]:
 
     return records
 
+def _bgp_from(summary_result: dict) -> BgpSummary:
+    """Map the device's BGP summary to the contract's shape."""
+    vrf = summary_result.get("vrfs", {}).get("default")
+
+    if not isinstance(vrf, dict):
+        raise ToolError("incomplete_result", "no vrfs.default in show ip bgp summary")
+
+    if "asn" not in vrf or "routerId" not in vrf:
+        raise ToolError("incomplete_result", "show ip bgp summary omitted asn or routerId")
+
+    peers = vrf.get("peers")
+
+    if not isinstance(peers, dict):
+        raise ToolError("incomplete_result", "no vrfs.default.peers mapping")
+
+    records: list[BgpPeer] = []
+
+    for address, entry in peers.items():
+        missing = [field for field in PEER_FIELDS.values() if field not in entry]
+
+        if missing:
+            raise ToolError("incomplete_result", f"{address} omitted: {', '.join(missing)}")
+
+        record = {contract: entry[device] for contract, device in PEER_FIELDS.items()}
+        record["peer_address"] = address
+        record["idle_reason"] = entry.get("peerStateIdleReason", "")
+
+        records.append(record)
+
+    if not records:
+        raise ToolError("no_peers", "device returned no BGP peers in VRF default")
+
+    return {"local_asn": vrf["asn"], "router_id": vrf["routerId"], "peers": records}
+
+
 def get_device_status(device: str, caller: str = "cli") -> DeviceStatus:
     """Return the identity of the requested device as the device itself reports it."""
     with audited(
@@ -297,3 +360,23 @@ def check_routes(device: str, caller: str = "cli") -> RouteList:
         record["route_count"] = len(routes)
 
         return {"routes": routes}
+
+def check_bgp_neighbors(device: str, caller: str = "cli") -> BgpSummary:
+    """Return the state of each BGP peer on the requested device."""
+    with audited(
+        "check_bgp_neighbors",
+        caller,
+        requested_device=device,
+        approved=False,
+        target_address=None,
+        command_sent=None,
+        peer_count=None,
+    ) as record:
+        summary_result, hostname_result = _connect(device, record, BGP_COMMANDS)
+
+        _verify_hostname(device, hostname_result)
+
+        summary = _bgp_from(summary_result)
+        record["peer_count"] = len(summary["peers"])
+
+        return summary

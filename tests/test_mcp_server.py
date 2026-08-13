@@ -4,7 +4,7 @@ import asyncio
 
 from mcp_server.server import mcp
 
-EXPECTED_TOOLS = {"list_lab_devices", "device_status", "interfaces", "routes"}
+EXPECTED_TOOLS = {"list_lab_devices", "device_status", "interfaces", "routes", "bgp_neighbors"}
 
 FORBIDDEN_TOOLS = {"run_command", "configure_device", "execute", "send_cli", "shell", "reload"}
 

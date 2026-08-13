@@ -7,10 +7,12 @@ from agent_nettools.tools import (
     DeviceStatus,
     InterfaceList,
     RouteList,
+    BgpSummary,
     check_interfaces,
     check_routes,
     get_device_status,
     list_devices,
+    check_bgp_neighbors,
 )
 
 mcp = MCPServer("AI Network Lab Tools")
@@ -38,6 +40,11 @@ def interfaces(device: str) -> InterfaceList:
 def routes(device: str) -> RouteList:
     """Return the connected and BGP-learned routes on one approved device."""
     return check_routes(device, caller="mcp")
+
+@mcp.tool()
+def bgp_neighbors(device: str) -> BgpSummary:
+    """Return the state of each BGP peer on one approved device."""
+    return check_bgp_neighbors(device, caller="mcp")
 
 
 if __name__ == "__main__":

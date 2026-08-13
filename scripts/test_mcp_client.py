@@ -19,11 +19,15 @@ async def main() -> None:
 
         print("\n=== CALL: list_lab_devices ===")
         result = await client.call_tool("list_lab_devices", {})
-        print(result)
+        print(result.structured_content)
 
         print(f"\n=== CALL: device_status (device={device}) ===")
         result = await client.call_tool("device_status", {"device": device})
-        print(result)
+        print(result.structured_content)
+
+        print(f"\n=== CALL: interfaces (device={device}) ===")
+        result = await client.call_tool("interfaces", {"device": device})
+        print(result.structured_content)
 
 
 if __name__ == "__main__":

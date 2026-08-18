@@ -65,10 +65,14 @@ class BgpSummary(TypedDict):
     local_asn: str
     router_id: str
     peers: list[BgpPeer]
-    
-    
+
+
 COMMANDS = ["show hostname", "show version"]
 ROUTE_COMMANDS = ["show ip route connected", "show ip route bgp", "show hostname"]
+INTERFACE_COMMANDS = ["show ip interface brief", "show hostname"]
+BGP_COMMANDS = ["show ip bgp summary", "show hostname"]
+
+EXCLUDED_INTERFACES = {"Management0"}
 
 VERSION_FIELDS = {
     "manufacturer": "mfgName",
@@ -79,12 +83,6 @@ VERSION_FIELDS = {
     "uptime_seconds": "uptime",
 }
 
-INTERFACE_COMMANDS = ["show ip interface brief", "show hostname"]
-
-EXCLUDED_INTERFACES = {"Management0"}
-
-BGP_COMMANDS = ["show ip bgp summary", "show hostname"]
-
 PEER_FIELDS = {
     "remote_asn": "asn",
     "peer_state": "peerState",
@@ -93,6 +91,21 @@ PEER_FIELDS = {
     "messages_received": "msgReceived",
     "messages_sent": "msgSent",
 }
+
+
+class Reason:
+    """The blocked_when tokens. Must match the contracts in docs/*.yml."""
+
+    NOT_APPROVED = "not_approved"
+    NOT_IN_TOPOLOGY = "not_in_topology"
+    WRONG_KIND = "wrong_kind"
+    HOSTNAME_MISMATCH = "hostname_mismatch"
+    INCOMPLETE_RESULT = "incomplete_result"
+    NO_INTERFACES = "no_interfaces"
+    NO_ROUTES = "no_routes"
+    NO_PEERS = "no_peers"
+    LIST_UNREADABLE = "list_unreadable"
+    LIST_MALFORMED = "list_malformed"
 
 
 class ToolError(Exception):
@@ -140,16 +153,16 @@ def audited(tool: str, caller: str, **initial):
 def _connect(device: str, record: dict, commands: list[str]) -> list[dict]:
     """Gate, resolve, connect. Raise ToolError on any refusal."""
     if not is_approved(device):
-        raise ToolError("not_approved", f"{device} is not in the approved device list")
+        raise ToolError(Reason.NOT_APPROVED, f"{device} is not in the approved device list")
 
     record["approved"] = True
 
     try:
         address = resolve_address(device)
     except LookupError as exc:
-        raise ToolError("not_in_topology", str(exc)) from exc
+        raise ToolError(Reason.NOT_IN_TOPOLOGY, str(exc)) from exc
     except ValueError as exc:
-        raise ToolError("wrong_kind", str(exc)) from exc
+        raise ToolError(Reason.WRONG_KIND, str(exc)) from exc
 
     record["target_address"] = address
     record["command_sent"] = commands
@@ -165,7 +178,10 @@ def _verify_hostname(requested: str, hostname_result: dict) -> str:
     reported = hostname_result.get("hostname")
 
     if reported != requested:
-        raise ToolError("hostname_mismatch", f"requested {requested}, device reported {reported!r}")
+        raise ToolError(
+            Reason.HOSTNAME_MISMATCH,
+            f"requested {requested}, device reported {reported!r}",
+        )
 
     return reported
 
@@ -182,7 +198,7 @@ def _identity_from(version_result: dict) -> dict:
             identity[contract_field] = version_result[device_field]
 
     if missing:
-        raise ToolError("incomplete_result", f"show version omitted: {', '.join(missing)}")
+        raise ToolError(Reason.INCOMPLETE_RESULT, f"show version omitted: {', '.join(missing)}")
 
     return identity
 
@@ -192,7 +208,10 @@ def _interfaces_from(brief_result: dict) -> list[InterfaceRecord]:
     interfaces = brief_result.get("interfaces")
 
     if not isinstance(interfaces, dict):
-        raise ToolError("incomplete_result", "no 'interfaces' mapping in show ip interface brief")
+        raise ToolError(
+            Reason.INCOMPLETE_RESULT,
+            "no 'interfaces' mapping in show ip interface brief",
+        )
 
     records: list[InterfaceRecord] = []
 
@@ -207,7 +226,7 @@ def _interfaces_from(brief_result: dict) -> list[InterfaceRecord]:
             missing.append("interfaceAddress.ipAddr")
 
         if missing:
-            raise ToolError("incomplete_result", f"{name} omitted: {', '.join(missing)}")
+            raise ToolError(Reason.INCOMPLETE_RESULT, f"{name} omitted: {', '.join(missing)}")
 
         records.append({
             "name": name,
@@ -217,7 +236,10 @@ def _interfaces_from(brief_result: dict) -> list[InterfaceRecord]:
         })
 
     if not records:
-        raise ToolError("no_interfaces", "device returned no interfaces outside the excluded set")
+        raise ToolError(
+            Reason.NO_INTERFACES,
+            "device returned no interfaces outside the excluded set",
+        )
 
     return records
 
@@ -230,13 +252,16 @@ def _routes_from(*route_results: dict) -> list[RouteRecord]:
         routes = result.get("vrfs", {}).get("default", {}).get("routes")
 
         if not isinstance(routes, dict):
-            raise ToolError("incomplete_result", "no vrfs.default.routes mapping in route output")
+            raise ToolError(
+                Reason.INCOMPLETE_RESULT,
+                "no vrfs.default.routes mapping in route output",
+            )
 
         for prefix, entry in routes.items():
             vias = entry.get("vias")
 
             if "routeType" not in entry or not isinstance(vias, list):
-                raise ToolError("incomplete_result", f"{prefix} omitted routeType or vias")
+                raise ToolError(Reason.INCOMPLETE_RESULT, f"{prefix} omitted routeType or vias")
 
             records.append({
                 "prefix": prefix,
@@ -248,24 +273,28 @@ def _routes_from(*route_results: dict) -> list[RouteRecord]:
             })
 
     if not records:
-        raise ToolError("no_routes", "device returned no routes in VRF default")
+        raise ToolError(Reason.NO_ROUTES, "device returned no routes in VRF default")
 
     return records
+
 
 def _bgp_from(summary_result: dict) -> BgpSummary:
     """Map the device's BGP summary to the contract's shape."""
     vrf = summary_result.get("vrfs", {}).get("default")
 
     if not isinstance(vrf, dict):
-        raise ToolError("incomplete_result", "no vrfs.default in show ip bgp summary")
+        raise ToolError(Reason.INCOMPLETE_RESULT, "no vrfs.default in show ip bgp summary")
 
     if "asn" not in vrf or "routerId" not in vrf:
-        raise ToolError("incomplete_result", "show ip bgp summary omitted asn or routerId")
+        raise ToolError(
+            Reason.INCOMPLETE_RESULT,
+            "show ip bgp summary omitted asn or routerId",
+        )
 
     peers = vrf.get("peers")
 
     if not isinstance(peers, dict):
-        raise ToolError("incomplete_result", "no vrfs.default.peers mapping")
+        raise ToolError(Reason.INCOMPLETE_RESULT, "no vrfs.default.peers mapping")
 
     records: list[BgpPeer] = []
 
@@ -273,7 +302,7 @@ def _bgp_from(summary_result: dict) -> BgpSummary:
         missing = [field for field in PEER_FIELDS.values() if field not in entry]
 
         if missing:
-            raise ToolError("incomplete_result", f"{address} omitted: {', '.join(missing)}")
+            raise ToolError(Reason.INCOMPLETE_RESULT, f"{address} omitted: {', '.join(missing)}")
 
         record = {contract: entry[device] for contract, device in PEER_FIELDS.items()}
         record["peer_address"] = address
@@ -282,7 +311,7 @@ def _bgp_from(summary_result: dict) -> BgpSummary:
         records.append(record)
 
     if not records:
-        raise ToolError("no_peers", "device returned no BGP peers in VRF default")
+        raise ToolError(Reason.NO_PEERS, "device returned no BGP peers in VRF default")
 
     return {"local_asn": vrf["asn"], "router_id": vrf["routerId"], "peers": records}
 
@@ -311,9 +340,9 @@ def list_devices(caller: str = "cli") -> DeviceList:
         try:
             devices = load_approved_devices()
         except FileNotFoundError as exc:
-            raise ToolError("list_unreadable", str(exc)) from exc
+            raise ToolError(Reason.LIST_UNREADABLE, str(exc)) from exc
         except ValueError as exc:
-            raise ToolError("list_malformed", str(exc)) from exc
+            raise ToolError(Reason.LIST_MALFORMED, str(exc)) from exc
 
         record["device_count"] = len(devices)
 
@@ -361,6 +390,7 @@ def check_routes(device: str, caller: str = "cli") -> RouteList:
 
         return {"routes": routes}
 
+
 def check_bgp_neighbors(device: str, caller: str = "cli") -> BgpSummary:
     """Return the state of each BGP peer on the requested device."""
     with audited(
@@ -378,5 +408,5 @@ def check_bgp_neighbors(device: str, caller: str = "cli") -> BgpSummary:
 
         summary = _bgp_from(summary_result)
         record["peer_count"] = len(summary["peers"])
-
+        
         return summary

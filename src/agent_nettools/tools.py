@@ -8,6 +8,8 @@ from agent_nettools.audit import utc_now, write_record
 from agent_nettools.eapi import EapiError, run_commands
 from agent_nettools.inventory import is_approved, load_approved_devices
 from agent_nettools.topology import resolve_address
+from agent_nettools.intent import load_intended_config
+
 
 
 class DeviceStatus(TypedDict):
@@ -67,6 +69,10 @@ class BgpSummary(TypedDict):
     peers: list[BgpPeer]
 
 
+class IntendedConfig(TypedDict):
+    device: str
+    config: str
+
 COMMANDS = ["show hostname", "show version"]
 ROUTE_COMMANDS = ["show ip route connected", "show ip route bgp", "show hostname"]
 INTERFACE_COMMANDS = ["show ip interface brief", "show hostname"]
@@ -106,6 +112,8 @@ class Reason:
     NO_PEERS = "no_peers"
     LIST_UNREADABLE = "list_unreadable"
     LIST_MALFORMED = "list_malformed"
+    CONFIG_NOT_FOUND = "config_not_found"
+    CONFIG_EMPTY = "config_empty"
 
 
 class ToolError(Exception):
@@ -410,3 +418,29 @@ def check_bgp_neighbors(device: str, caller: str = "cli") -> BgpSummary:
         record["peer_count"] = len(summary["peers"])
         
         return summary
+
+
+def get_intended_config(device: str, caller: str = "cli") -> IntendedConfig:
+    """Return the configuration this device was designed to have."""
+    with audited(
+        "get_intended_config",
+        caller,
+        requested_device=device,
+        approved=False,
+        line_count=None,
+    ) as record:
+        if not is_approved(device):
+            raise ToolError(Reason.NOT_APPROVED, f"{device} is not in the approved device list")
+
+        record["approved"] = True
+
+        try:
+            config = load_intended_config(device)
+        except FileNotFoundError as exc:
+            raise ToolError(Reason.CONFIG_NOT_FOUND, str(exc)) from exc
+        except ValueError as exc:
+            raise ToolError(Reason.CONFIG_EMPTY, str(exc)) from exc
+
+        record["line_count"] = len(config.splitlines())
+
+        return {"device": device, "config": config}

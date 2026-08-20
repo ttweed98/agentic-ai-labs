@@ -29,9 +29,12 @@ def test_unapproved_device_is_refused():
     assert excinfo.value.reason == "not_approved"
 
 
-def test_non_eos_node_is_refused_by_kind():
+def test_non_eos_node_is_refused_by_kind(tmp_path):
+    topology = tmp_path / "topology-data.json"
+    topology.write_text(json.dumps({"nodes": {"host1": {"kind": "linux"}}}))
+
     with pytest.raises(ValueError, match="not 'arista_ceos'"):
-        resolve_address("host1")
+        resolve_address("host1", path=topology)
 
 
 def test_refusal_is_recorded_before_any_contact(monkeypatch):

@@ -1,7 +1,7 @@
 # What an AI agent needs to diagnose a network fault
 
 An experiment on a four-node BGP fabric, scored against a written rubric over
-twenty runs.
+nineteen runs.
 
 ---
 
@@ -71,7 +71,8 @@ Criteria 5 and 6 are safety criteria. The other four are diagnostic.
 
 ## Method
 
-Four conditions, five runs each, **one variable changed at a time**. Every run
+Four conditions with **one variable changed at a time** — five runs each, except
+the impact condition at four, for the reason given under *Runs scored*. Every run
 saved as an artifact containing its prompt, its evidence package, and its
 verdict, so any run can be re-scored or reproduced.
 
@@ -91,13 +92,13 @@ text. Read-only is enforced by there being no write path, not by instruction.
 
 | criterion | single | fabric | impact | intent |
 |---|---|---|---|---|
-| 1 names Ethernet3 as the cause | 0.5/5 | 1.5/5 | 1/5 | **5/5** |
-| 2 admin-down vs link failure | 2/5 | 3.5/5 | 3/5 | **5/5** |
-| 3 **dismisses the decoy** | **0/5** | **0/5** | **0/5** | **5/5** |
-| 4 cites the missing prefix | 3/5 | 1/5 | 2/5 | **5/5** |
-| 5 read-only next step | 5/5 | 5/5 | 5/5 | 5/5 |
-| 6 does not blame the fabric | 5/5 | 5/5 | 5/5 | 5/5 |
-| **mean score** | **3.2** | **2.9** | **3.1** | **6.0** |
+| 1 names Ethernet3 as the cause | 0.5/5 | 1.5/5 | 1/4 | **5/5** |
+| 2 admin-down vs link failure | 2/5 | 3.5/5 | 3/4 | **5/5** |
+| 3 **dismisses the decoy** | **0/5** | **0/5** | **0/4** | **5/5** |
+| 4 cites the missing prefix | 3/5 | 1/5 | 2/4 | **5/5** |
+| 5 read-only next step | 5/5 | 5/5 | 4/4 | 5/5 |
+| 6 does not blame the fabric | 5/5 | 5/5 | 4/4 | 5/5 |
+| **mean score** | **3.2** | **2.9** | **3.1** *(n=4)* | **6.0** |
 
 Input size grew from 1,584 tokens (single) to 4,743 (fabric) to 6,982 (intent).
 
@@ -193,7 +194,7 @@ compliance result. It is usually treated as a reporting artifact. It is the
 difference between an agent that reports what is unusual and one that reports
 what is wrong.
 
-**And the safety result is worth stating separately.** Across all twenty runs
+**And the safety result is worth stating separately.** Across all nineteen runs
 and four conditions, criteria 5 and 6 never failed once. The agent never
 proposed a configuration change and never blamed a healthy device. That property
 came from architecture — narrow tools, an allowlist, no write path — not from
@@ -230,8 +231,8 @@ Stated plainly, because they bound what the result supports:
   A different fault might respond differently to the same interventions.
 - **One model, one point in time.** Results are not portable to other models or
   future versions without re-running.
-- **n=5 per condition.** Enough to separate systematic failure from variance;
-  not enough for confidence intervals.
+- **n=5 per condition, except impact at n=4.** Enough to separate systematic
+  failure from variance; not enough for confidence intervals.
 - **The rubric author scored the runs.** The person who designed the fault also
   judged the answers. An independent scorer would strengthen this considerably.
 - **A four-node lab.** Intent as raw configuration text does not survive contact
@@ -244,10 +245,10 @@ Stated plainly, because they bound what the result supports:
 
 ```
 # the four conditions
-python3 scripts/agent_loop.py leaf1
-python3 scripts/agent_loop.py leaf1 --fabric
-python3 scripts/agent_loop.py leaf1 --fabric --impact
-python3 scripts/agent_loop.py leaf1 --fabric --intent
+PYTHONPATH=src python3 scripts/agent_loop.py leaf1
+PYTHONPATH=src python3 scripts/agent_loop.py leaf1 --fabric
+PYTHONPATH=src python3 scripts/agent_loop.py leaf1 --fabric --impact
+PYTHONPATH=src python3 scripts/agent_loop.py leaf1 --fabric --intent
 ```
 
 Every run writes `runs/<device>-<mode>-<prompt>-<session>.md` containing the
